@@ -15,9 +15,9 @@ Suno AI is an intelligent voice assistant for NVDA screen reader, designed to pr
 ## Usage
 
 ### Waking the Assistant
-You can wake the assistant in two ways:
-1. **Voice:** Simply say **"Hey Suno"** into your microphone. Wait for the "Beep" sound, and then immediately speak your command.
-2. **Keyboard Shortcut:** Press `NVDA + Shift + S`.
+You can wake the assistant using your voice:
+- Simply say **"Hey Suno"** or **"Hello Suno"** into your microphone.
+- Wait for the **"Beep"** sound, then immediately speak your command.
 
 ### Example Commands
 - **App launching:** "Open Google Chrome", "Start Calculator", "Launch WhatsApp", "Word kholo"
