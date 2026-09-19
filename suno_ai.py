@@ -23,7 +23,8 @@ confspec = {
     "wake_word": "string(default='hey suno')",
     "sensitivity": "integer(min=30, max=99, default=85)",
     "last_version": "string(default='1.0.0')",
-    "custom_commands": "string_list(default=list())"
+    "custom_commands": "string_list(default=list())",
+    "show_response_box": "boolean(default=False)"
 }
 config.conf.spec["suno_ai"] = confspec
 
@@ -43,18 +44,23 @@ class SunoAISettingsPanel(SettingsPanel):
         cmds_str = "\n".join(config.conf["suno_ai"]["custom_commands"])
         self.cmd_edit = wx.TextCtrl(self, style=wx.TE_MULTILINE, value=cmds_str)
         
+        self.show_box_cb = wx.CheckBox(self, label="S&how AI responses in a readable text box")
+        self.show_box_cb.SetValue(config.conf["suno_ai"]["show_response_box"])
+        
         sizer.Add(ww_label)
         sizer.Add(self.ww_edit, 0, wx.EXPAND | wx.BOTTOM, 10)
         sizer.Add(sens_label)
         sizer.Add(self.sens_slider, 0, wx.EXPAND | wx.BOTTOM, 10)
         sizer.Add(cmd_label)
         sizer.Add(self.cmd_edit, 1, wx.EXPAND | wx.BOTTOM, 10)
+        sizer.Add(self.show_box_cb, 0, wx.BOTTOM, 10)
         
         settingsSizer.Add(sizer, 0, wx.EXPAND)
         
     def onSave(self):
         config.conf["suno_ai"]["wake_word"] = self.ww_edit.GetValue().strip().lower()
         config.conf["suno_ai"]["sensitivity"] = self.sens_slider.GetValue()
+        config.conf["suno_ai"]["show_response_box"] = self.show_box_cb.GetValue()
         
         cmds = []
         for line in self.cmd_edit.GetValue().split('\n'):
@@ -86,17 +92,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.winmm = ctypes.windll.winmm
         self.lock_path = os.path.join(os.getenv("TEMP"), "suno_pause.lock")
         
-        current_version = "2.0.3"
+        current_version = "2.1.3"
         if config.conf["suno_ai"]["last_version"] != current_version:
             config.conf["suno_ai"]["last_version"] = current_version
             msg = (
-                "Welcome to Suno AI Voice Assistant v2.0.3!\n\n"
+                "Welcome to Suno AI Voice Assistant v2.1.3!\n\n"
                 "What's New:\n"
-                "1. Custom Voice Commands: Go to NVDA Settings -> Suno AI to set your own custom phrases (e.g., 'open my game = C:\\game.exe').\n"
-                "2. Smarter Web Search: Just say 'youtube music' or 'google news' for instant hands-free searches.\n"
-                "3. Open Websites Directly: Say 'go to facebook.com' or 'open youtube.com'.\n"
-                "4. Improved Wake Word Strictness: Default strictness is now 85 to completely ignore background noise.\n"
-                "5. Sleep Mode: Press NVDA+Shift+W to temporarily pause and resume the assistant during calls."
+                "1. Copyable Responses: You can now enable a text box for AI responses in NVDA Settings -> Suno AI.\n"
+                "2. Take Screenshots: Say 'Take a screenshot' to instantly save a picture of your screen.\n"
+                "3. Take Pictures: Say 'Take a picture' to snap a photo using your laptop's camera.\n"
+                "4. System Info: Say 'Device info', 'Storage info', or 'RAM info' to manage your system.\n"
+                "5. All pictures and screenshots are automatically saved to your Pictures folder.\n\n"
+                "Join Suno Tech Solutions Community on WhatsApp:\n"
+                "https://chat.whatsapp.com/E5yVVf0UY7l5pHGDDYdzFy"
             )
             core.callLater(2000, ui.browseableMessage, msg, "Suno AI Update")
             
@@ -355,6 +363,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             reply = self._get_smart_reply(user_text.lower())
             core.callLater(10, ui.message, f"Suno AI: {reply}")
+            if config.conf["suno_ai"].get("show_response_box", False):
+                core.callLater(50, ui.browseableMessage, f"{reply}", "Suno AI Response")
         except Exception as e:
             core.callLater(10, ui.message, f"Error generating reply: {str(e)}")
 
@@ -427,7 +437,70 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             except:
                 pass
                 
-        # 3. Open ANY App (Start Menu Fuzzy Search & Fallback)
+        # 3. System Management
+        if "device info" in text or "system info" in text or "system management" in text:
+            try:
+                out = subprocess.check_output('powershell -Command "Get-CimInstance Win32_OperatingSystem | Select-Object -ExpandProperty Caption; Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name"', shell=True).decode('utf-8', 'ignore').strip().split('\n')
+                if len(out) >= 2:
+                    return f"{out[0].strip()}. Processor: {out[1].strip()}."
+            except:
+                pass
+            return "Could not fetch device info."
+            
+        if "storage info" in text or "storage management" in text:
+            try:
+                out = subprocess.check_output('powershell -Command "$d=Get-CimInstance Win32_LogicalDisk -Filter \\"DeviceID=\'C:\'\\"; \\"$([math]::Round($d.FreeSpace / 1GB)) GB free out of $([math]::Round($d.Size / 1GB)) GB\\""', shell=True).decode('utf-8', 'ignore').strip()
+                return f"C Drive has {out}."
+            except:
+                return "Could not fetch storage info."
+            
+        if "ram info" in text or "ram management" in text:
+            try:
+                out = subprocess.check_output('powershell -Command "$o=Get-CimInstance Win32_OperatingSystem; \\"$([math]::Round($o.FreePhysicalMemory / 1024)) MB free out of $([math]::Round($o.TotalVisibleMemorySize / 1024)) MB total\\""', shell=True).decode('utf-8', 'ignore').strip()
+                return f"RAM: {out}."
+            except:
+                return "Could not fetch RAM info."
+                
+        # 4. Screenshots and Camera
+        if "take a screenshot" in text or "capture screen" in text:
+            try:
+                pics_dir = os.path.join(os.environ.get("USERPROFILE"), "Pictures")
+                if not os.path.exists(pics_dir):
+                    os.makedirs(pics_dir)
+                filename = f"Screenshot_{int(time.time())}.png"
+                filepath = os.path.join(pics_dir, filename)
+                
+                def do_screenshot():
+                    try:
+                        screen = wx.ScreenDC()
+                        size = screen.GetSize()
+                        bmp = wx.Bitmap(size.width, size.height)
+                        mem = wx.MemoryDC(bmp)
+                        mem.Blit(0, 0, size.width, size.height, screen, 0, 0)
+                        del mem
+                        bmp.SaveFile(filepath, wx.BITMAP_TYPE_PNG)
+                    except:
+                        pass
+                
+                # Screenshot must be taken in the main thread
+                core.callLater(10, do_screenshot)
+                return "Taking screenshot. It will be saved in your Pictures folder in a moment."
+            except Exception as e:
+                return "Failed to take screenshot."
+                
+        if "take a picture" in text or "capture photo" in text:
+            try:
+                # avicap32 fails on modern 64-bit systems with multiple virtual cameras.
+                # The most accessible and reliable way is to launch the native Windows Camera app.
+                os.system("start microsoft.windows.camera:")
+                
+                if "description" in text or "recognize" in text:
+                    return "Camera app opened. Press Enter or Space to take a picture. Image description AI requires an API key which is not configured."
+                return "Camera app opened. Press Enter or Space to take a picture. It will be saved in your Camera Roll."
+            except Exception as e:
+                return "Failed to access camera app."
+                
+        # 5. Open ANY App (Start Menu Fuzzy Search & Fallback)
         if "open" in text or "launch" in text or "start" in text or "kholo" in text:
             match = re.search(r'(open|launch|start|kholo)\s+(.*)', text)
             if match:
