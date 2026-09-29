@@ -24,7 +24,9 @@ confspec = {
     "sensitivity": "integer(min=30, max=99, default=85)",
     "last_version": "string(default='1.0.0')",
     "custom_commands": "string_list(default=list())",
-    "show_response_box": "boolean(default=False)"
+    "show_response_box": "boolean(default=False)",
+    "spoken_language": "string(default='ur-PK')",
+    "translated_language": "string(default='en')"
 }
 config.conf.spec["suno_ai"] = confspec
 
@@ -44,6 +46,12 @@ class SunoAISettingsPanel(SettingsPanel):
         cmds_str = "\n".join(config.conf["suno_ai"]["custom_commands"])
         self.cmd_edit = wx.TextCtrl(self, style=wx.TE_MULTILINE, value=cmds_str)
         
+        sl_label = wx.StaticText(self, label="&Spoken Language Code (e.g. ur-PK, en-US, hi-IN):")
+        self.sl_edit = wx.TextCtrl(self, value=config.conf["suno_ai"]["spoken_language"])
+        
+        tl_label = wx.StaticText(self, label="&Translated Language Code (e.g. en, ur, hi):")
+        self.tl_edit = wx.TextCtrl(self, value=config.conf["suno_ai"]["translated_language"])
+        
         self.show_box_cb = wx.CheckBox(self, label="S&how AI responses in a readable text box")
         self.show_box_cb.SetValue(config.conf["suno_ai"]["show_response_box"])
         
@@ -51,6 +59,10 @@ class SunoAISettingsPanel(SettingsPanel):
         sizer.Add(self.ww_edit, 0, wx.EXPAND | wx.BOTTOM, 10)
         sizer.Add(sens_label)
         sizer.Add(self.sens_slider, 0, wx.EXPAND | wx.BOTTOM, 10)
+        sizer.Add(sl_label)
+        sizer.Add(self.sl_edit, 0, wx.EXPAND | wx.BOTTOM, 10)
+        sizer.Add(tl_label)
+        sizer.Add(self.tl_edit, 0, wx.EXPAND | wx.BOTTOM, 10)
         sizer.Add(cmd_label)
         sizer.Add(self.cmd_edit, 1, wx.EXPAND | wx.BOTTOM, 10)
         sizer.Add(self.show_box_cb, 0, wx.BOTTOM, 10)
@@ -61,6 +73,8 @@ class SunoAISettingsPanel(SettingsPanel):
         config.conf["suno_ai"]["wake_word"] = self.ww_edit.GetValue().strip().lower()
         config.conf["suno_ai"]["sensitivity"] = self.sens_slider.GetValue()
         config.conf["suno_ai"]["show_response_box"] = self.show_box_cb.GetValue()
+        config.conf["suno_ai"]["spoken_language"] = self.sl_edit.GetValue().strip()
+        config.conf["suno_ai"]["translated_language"] = self.tl_edit.GetValue().strip()
         
         cmds = []
         for line in self.cmd_edit.GetValue().split('\n'):
@@ -75,6 +89,37 @@ class SunoAISettingsPanel(SettingsPanel):
                 break
 
 gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(SunoAISettingsPanel)
+
+def translate_text_api(text, sl, tl):
+    try:
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={sl}&tl={tl}&dt=t&q={urllib.parse.quote(text)}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            res = json.loads(r.read().decode('utf-8'))
+            return "".join([x[0] for x in res[0]])
+    except Exception as e:
+        return ""
+
+class TranslationFrame(wx.Frame):
+    def __init__(self, parent, title):
+        super(TranslationFrame, self).__init__(parent, title=title, size=(600, 400))
+        panel = wx.Panel(self)
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        self.text_ctrl = wx.TextCtrl(panel, style=wx.TE_MULTILINE | wx.TE_READONLY)
+        vbox.Add(self.text_ctrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=10)
+        panel.SetSizer(vbox)
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
+        self.is_active = True
+        self.Show()
+        self.Raise()
+        self.text_ctrl.SetFocus()
+
+    def append_text(self, text):
+        self.text_ctrl.AppendText(text + "\n")
+
+    def OnClose(self, event):
+        self.is_active = False
+        event.Skip()
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     scriptCategory = "Suno AI"
@@ -92,17 +137,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.winmm = ctypes.windll.winmm
         self.lock_path = os.path.join(os.getenv("TEMP"), "suno_pause.lock")
         
-        current_version = "2.1.3"
+        current_version = "2.2.1"
         if config.conf["suno_ai"]["last_version"] != current_version:
             config.conf["suno_ai"]["last_version"] = current_version
             msg = (
-                "Welcome to Suno AI Voice Assistant v2.1.3!\n\n"
+                "Welcome to Suno AI Voice Assistant v2.2.1!\n\n"
                 "What's New:\n"
-                "1. Copyable Responses: You can now enable a text box for AI responses in NVDA Settings -> Suno AI.\n"
-                "2. Take Screenshots: Say 'Take a screenshot' to instantly save a picture of your screen.\n"
-                "3. Take Pictures: Say 'Take a picture' to snap a photo using your laptop's camera.\n"
-                "4. System Info: Say 'Device info', 'Storage info', or 'RAM info' to manage your system.\n"
-                "5. All pictures and screenshots are automatically saved to your Pictures folder.\n\n"
+                "1. Live Voice Translation: Say 'Start voice translation' to open a dictation box. Speak in your language and it will be translated and typed automatically! You can change the Spoken and Translated languages in NVDA Settings -> Suno AI.\n"
+                "2. Copyable Responses: You can enable a text box for AI responses in settings.\n"
+                "3. Take Screenshots: Say 'Take a screenshot'.\n"
+                "4. Take Pictures: Say 'Take a picture'.\n"
+                "5. System Info: Say 'Device info', 'Storage info', or 'RAM info'.\n\n"
                 "Join Suno Tech Solutions Community on WhatsApp:\n"
                 "https://chat.whatsapp.com/E5yVVf0UY7l5pHGDDYdzFy"
             )
@@ -128,7 +173,81 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 os.remove(self.lock_path)
         except:
             pass
+        if hasattr(self, 'translation_frame') and self.translation_frame:
+            try:
+                wx.CallAfter(self.translation_frame.Close)
+            except:
+                pass
         super(GlobalPlugin, self).terminate()
+
+    def _translation_loop(self):
+        sl = config.conf["suno_ai"]["spoken_language"]
+        tl = config.conf["suno_ai"]["translated_language"]
+        
+        # Lock the microphone so wake word doesn't interfere
+        self.pause_wakeword = True
+        try:
+            with open(self.lock_path, "w") as f:
+                f.write("1")
+        except:
+            pass
+            
+        while hasattr(self, 'translation_frame') and self.translation_frame and getattr(self.translation_frame, 'is_active', False):
+            wav_path = os.path.join(os.getenv("TEMP"), f"suno_trans_{int(time.time())}.wav")
+            self.winmm.mciSendStringW("close capture", None, 0, None)
+            self.winmm.mciSendStringW("open new type waveaudio alias capture", None, 0, None)
+            self.winmm.mciSendStringW("record capture", None, 0, None)
+            
+            for _ in range(50):
+                if not getattr(self.translation_frame, 'is_active', False):
+                    break
+                time.sleep(0.1)
+                
+            self.winmm.mciSendStringW("stop capture", None, 0, None)
+            self.winmm.mciSendStringW(f"save capture \"{wav_path}\"", None, 0, None)
+            self.winmm.mciSendStringW("close capture", None, 0, None)
+            
+            if os.path.exists(wav_path):
+                try:
+                    with open(wav_path, "rb") as f:
+                        audio_data = f.read()
+                    os.remove(wav_path)
+                    
+                    text = self._recognize_google(audio_data, lang=sl)
+                    if text:
+                        translated = translate_text_api(text, sl, tl)
+                        if translated and hasattr(self, 'translation_frame') and getattr(self.translation_frame, 'is_active', False):
+                            wx.CallAfter(self.translation_frame.append_text, f"{text}\n-> {translated}\n")
+                except:
+                    pass
+                    
+        # Release the microphone lock
+        try:
+            if os.path.exists(self.lock_path):
+                os.remove(self.lock_path)
+        except:
+            pass
+        self.pause_wakeword = False
+
+    def start_voice_translation(self):
+        if hasattr(self, 'translation_frame'):
+            del self.translation_frame
+            
+        def _open_frame():
+            try:
+                self.translation_frame = TranslationFrame(None, "Suno AI Live Translation")
+            except Exception as e:
+                pass
+        wx.CallAfter(_open_frame)
+        
+        def _run_loop():
+            for _ in range(50):
+                if hasattr(self, 'translation_frame') and getattr(self.translation_frame, 'is_active', False):
+                    break
+                time.sleep(0.1)
+            self._translation_loop()
+            
+        threading.Thread(target=_run_loop).start()
 
     def script_startListening(self, gesture):
         if self.pause_wakeword:
@@ -288,6 +407,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             $wakeGrammarBuilder = New-Object System.Speech.Recognition.GrammarBuilder
             $wakeGrammarBuilder.Append($choices)
             $wakeGrammar = New-Object System.Speech.Recognition.Grammar($wakeGrammarBuilder)
+            $dictationGrammar = New-Object System.Speech.Recognition.DictationGrammar
             
             try {{
                 $recognizer.SetInputToDefaultAudioDevice()
@@ -297,10 +417,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             }}
             
             $recognizer.LoadGrammar($wakeGrammar)
+            $recognizer.LoadGrammar($dictationGrammar)
             
             $global:WakeDetected = $false
             Register-ObjectEvent -InputObject $recognizer -EventName SpeechRecognized -Action {{
-                if ($Event.SourceEventArgs.Result.Confidence -gt {sens}) {{
+                if ($Event.SourceEventArgs.Result.Text -eq "{ww}" -and $Event.SourceEventArgs.Result.Confidence -gt {sens}) {{
                     $global:WakeDetected = $true
                 }}
             }}
@@ -381,6 +502,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     os.system(f'start "" "{path}"')
                     return f"Executing {cmd}."
                     
+        if "start voice translation" in text or "start translation" in text:
+            self.start_voice_translation()
+            return "Voice translation started. Please begin speaking."
+            
         # 2. Parameterized Web Search
         query = ""
         platform = ""
